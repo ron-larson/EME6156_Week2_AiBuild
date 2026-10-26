@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stack Pointer Triage - Level 2 Extra Credit Prototype</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1a1e24;
+      color: #e0e6ed;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      margin: 0;
+    }
+    h2 { margin-bottom: 4px; color: #64b5f6; }
+    p.subtitle { margin-top: 0; color: #90a4ae; font-size: 0.95rem; }
+    #game-container {
+      background-color: #263238;
+      border: 2px solid #37474f;
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    #hud {
+      display: flex;
+      justify-content: space-between;
+      width: 320px;
+      margin-bottom: 12px;
+      font-weight: bold;
+      font-size: 0.95rem;
+    }
+    .status-nominal { color: #81c784; }
+    .status-alert { color: #e57373; }
+    #stack-canvas {
+      background-color: #101418;
+      border: 2px solid #546e7a;
+      border-radius: 4px;
+    }
+    #controls {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    button {
+      padding: 10px 24px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      transition: background 0.15s ease;
+    }
+    .btn-push { background-color: #0288d1; color: white; }
+    .btn-push:hover { background-color: #039be5; }
+    .btn-pop { background-color: #d32f2f; color: white; }
+    .btn-pop:hover { background-color: #e53935; }
+    .btn-restart { background-color: #546e7a; color: white; margin-top: 12px; }
+    #feedback {
+      height: 24px;
+      margin-top: 12px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Stack Pointer Triage</h2>
+  <p class="subtitle">CS1 Prototype: Regulate stack capacity between 2 and 4 frames for 20 ticks</p>
+
+  <div id="game-container">
+    <div id="hud">
+      <span>Target Range: 2–4 Frames</span>
+      <span id="score-display">Survival: 0 / 20</span>
+    </div>
+
+    <canvas id="stack-canvas" width="320" height="260"></canvas>
+
+    <div id="feedback">Click PUSH or POP to regulate memory allocation.</div>
+
+    <div id="controls">
+      <button class="btn-push" id="push-btn">PUSH (Allocate)</button>
+      <button class="btn-pop" id="pop-btn">POP (Free)</button>
+    </div>
+
+    <button class="btn-restart" id="restart-btn" style="display: none;">Restart Simulation</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('stack-canvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('score-display');
+    const feedback = document.getElementById('feedback');
+    const restartBtn = document.getElementById('restart-btn');
+    const pushBtn = document.getElementById('push-btn');
+    const popBtn = document.getElementById('pop-btn');
+
+    const MAX_CAPACITY = 5;
+    let stack = [0x10A, 0x10B]; // Initial 2 items
+    let score = 0;
+    let gameOver = false;
+    let lastTickTime = performance.now();
+    const TICK_INTERVAL = 1200; // New interrupt arrives every 1.2s
+
+    function getUtilizationStatus() {
+      if (stack.length >= 2 && stack.length <= 4) return { text: "BUFFER STABLE", color: "#81c784" };
+      if (stack.length === 1) return { text: "WARNING: UNDER-ALLOCATION (< 2)", color: "#ffb74d" };
+      if (stack.length === 5) return { text: "WARNING: MEMORY SATURATION (5)", color: "#ffb74d" };
+      return { text: "CRITICAL FAILURE", color: "#e57373" };
+    }
+
+    function pushItem() {
+      if (gameOver) return;
+      if (stack.length >= MAX_CAPACITY) {
+        triggerFailure("STACK OVERFLOW EXCEPTION: Capacity 5 exceeded!");
+        return;
+      }
+      const randomHex = 0x100 + Math.floor(Math.random() * 0x8FF);
+      stack.push(randomHex);
+      render();
+    }
+
+    function popItem() {
+      if (gameOver) return;
+      if (stack.length === 0) {
+        triggerFailure("STACK UNDERFLOW EXCEPTION: Popped empty memory buffer!");
+        return;
+      }
+      stack.pop();
+      render();
+    }
+
+    function triggerFailure(message) {
+      gameOver = true;
+      feedback.textContent = message;
+      feedback.style.color = "#e57373";
+      restartBtn.style.display = "block";
+      render();
+    }
+
+    function triggerVictory() {
+      gameOver = true;
+      feedback.textContent = "TRIAGE COMPLETE: Memory allocation stabilized without leaks!";
+      feedback.style.color = "#81c784";
+      restartBtn.style.display = "block";
+      render();
+    }
+
+    function resetGame() {
+      stack = [0x10A, 0x10B];
+      score = 0;
+      gameOver = false;
+      feedback.textContent = "Click PUSH or POP to regulate memory allocation.";
+      feedback.style.color = "#e0e6ed";
+      restartBtn.style.display = "none";
+      lastTickTime = performance.now();
+      render();
+      requestAnimationFrame(gameLoop);
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const slotHeight = 36;
+      const slotWidth = 200;
+      const startX = 60;
+      const bottomY = 220;
+
+      // Draw Stack Outline Frame
+      ctx.strokeStyle = "#78909c";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(startX - 5, bottomY - (MAX_CAPACITY * slotHeight) - 10);
+      ctx.lineTo(startX - 5, bottomY + 5);
+      ctx.lineTo(startX + slotWidth + 5, bottomY + 5);
+      ctx.lineTo(startX + slotWidth + 5, bottomY - (MAX_CAPACITY * slotHeight) - 10);
+      ctx.stroke();
+
+      // Render Allocated Frames
+      for (let i = 0; i < MAX_CAPACITY; i++) {
+        const yPos = bottomY - ((i + 1) * slotHeight);
+
+        if (i < stack.length) {
+          // Frame Color based on overall stack health
+          ctx.fillStyle = (stack.length >= 2 && stack.length <= 4) ? "#1e88e5" : "#f57c00";
+          ctx.fillRect(startX, yPos + 2, slotWidth, slotHeight - 4);
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 13px Courier, monospace";
+          ctx.fillText(`SP[${i}] -> 0x${stack[i].toString(16).toUpperCase()}`, startX + 24, yPos + 22);
+
+          // Top of Stack Indicator
+          if (i === stack.length - 1) {
+            ctx.fillStyle = "#ffeb3b";
+            ctx.font = "bold 11px sans-serif";
+            ctx.fillText("<- TOP", startX + slotWidth + 12, yPos + 22);
+          }
+        } else {
+          // Empty Slot Guide
+          ctx.strokeStyle = "#37474f";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(startX, yPos + 2, slotWidth, slotHeight - 4);
+        }
+      }
+
+      // Update HUD
+      scoreDisplay.textContent = `Survival: ${score} / 20`;
+      const status = getUtilizationStatus();
+      if (!gameOver) {
+        feedback.textContent = status.text;
+        feedback.style.color = status.color;
+      }
+    }
+
+    function gameLoop(timestamp) {
+      if (gameOver) return;
+
+      if (timestamp - lastTickTime >= TICK_INTERVAL) {
+        lastTickTime = timestamp;
+
+        // Autonomous system event: Incoming interrupts randomly push or pop load
+        const systemEvent = Math.random();
+        if (systemEvent < 0.55) {
+          // System generates a background call (incoming push)
+          if (stack.length >= MAX_CAPACITY) {
+            triggerFailure("STACK OVERFLOW: Unhandled system interrupt breached limit!");
+            return;
+          }
+          stack.push(0x200 + Math.floor(Math.random() * 0x6FF));
+        } else if (systemEvent > 0.85 && stack.length > 0) {
+          // System clears a subroutine
+          stack.pop();
+        }
+
+        // Tally survival tick if maintained in nominal window
+        if (stack.length >= 2 && stack.length <= 4) {
+          score++;
+          if (score >= 20) {
+            triggerVictory();
+            return;
+          }
+        }
+        render();
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    pushBtn.addEventListener('click', pushItem);
+    popBtn.addEventListener('click', popItem);
+    restartBtn.addEventListener('click', resetGame);
+
+    render();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
